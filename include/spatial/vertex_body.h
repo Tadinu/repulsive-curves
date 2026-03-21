@@ -1,39 +1,38 @@
 #pragma once
 
-#include "geometrycentral/utilities/vector3.h" 
+#include "geometrycentral/utilities/vector3.h"
 
 namespace LWS {
+using namespace geometrycentral;
 
-    using namespace geometrycentral;
+enum class BodyType {
+    Vertex, Edge
+};
 
-    enum class BodyType {
-        Vertex, Edge
-    };
+struct VertexBody {
+    Vector3 position;
+    Vector3 tangent;
+    double mass;
+    int vertIndex;
+};
 
-    struct VertexBody {
-        Vector3 position;
-        Vector3 tangent;
-        double mass;
-        int vertIndex;
-    };
+struct PosTan {
+    Vector3 position;
+    Vector3 tangent;
+    void Print() const;
+};
 
-    struct PosTan {
-        Vector3 position;
-        Vector3 tangent;
-        void Print();
-    };
+struct VertexBody6D {
+    PosTan pt;
+    double mass;
+    int elementIndex;
+    BodyType type;
+};
 
-    struct VertexBody6D {
-        PosTan pt;
-        double mass;
-        int elementIndex;
-        BodyType type;
-    };
+PosTan postan_max(const PosTan& v1, const PosTan& v2);
+PosTan postan_min(const PosTan& v1, const PosTan& v2);
 
-    PosTan postan_max(PosTan v1, PosTan v2);
-    PosTan postan_min(PosTan v1, PosTan v2);
+Vector3 CartesianToSpherical(const Vector3& cartesian);
 
-    Vector3 CartesianToSpherical(Vector3 cartesian);
-
-    Vector3 SphericalToCartesian(Vector3 spherical);
+Vector3 SphericalToCartesian(const Vector3& spherical);
 }

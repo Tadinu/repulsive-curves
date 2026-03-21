@@ -6,24 +6,25 @@
 #include "Eigen/Core"
 
 namespace LWS {
-    class SpatialTree {
-        public:
-        // Virtual destructor
-        virtual ~SpatialTree() = 0;
-        
-        // Compute the total energy contribution from a single vertex
-        virtual void accumulateVertexEnergy(double &result, CurveVertex* &i_pt,
-            PolyCurveNetwork* curves, double alpha, double beta) = 0;
+class SpatialTree {
+public:
+    // Virtual destructor
+    virtual ~SpatialTree() = 0;
 
-        // Compute the total TPE gradient at a single vertex and its neighbors
-        virtual void accumulateTPEGradient(Eigen::MatrixXd &gradients, CurveVertex* &i_pt,
-            PolyCurveNetwork* curves, double alpha, double beta) = 0;
+    // Compute the total energy contribution from a single vertex
+    virtual void accumulateVertexEnergy(double& result, const CurveVertex* i_pt,
+                                        const PolyCurveNetwork* curves, double alpha, double beta) = 0;
 
-        // Use the given spatial tree to compute the TPE gradient with Barnes-Hut.
-        static void TPEGradientBarnesHut(PolyCurveNetwork* curveNetwork, SpatialTree *root,
-        Eigen::MatrixXd &gradients, double alpha, double beta);
+    // Compute the total TPE gradient at a single vertex and its neighbors
+    virtual void accumulateTPEGradient(Eigen::MatrixXd& gradients, const CurveVertex* i_pt,
+                                       const PolyCurveNetwork* curves, double alpha, double beta) = 0;
 
-        // Use the given spatial tree to compute the TPE energy with Barnes-Hut.
-        static double TPEnergyBH(PolyCurveNetwork* curveNetwork, SpatialTree *root, double alpha, double beta);
-    };
+    // Use the given spatial tree to compute the TPE gradient with Barnes-Hut.
+    static void TPEGradientBarnesHut(const PolyCurveNetwork* curveNetwork, SpatialTree* root,
+                                     Eigen::MatrixXd& gradients, double alpha, double beta);
+
+    // Use the given spatial tree to compute the TPE energy with Barnes-Hut.
+    static double TPEnergyBH(const PolyCurveNetwork* curveNetwork, SpatialTree* root, double alpha,
+                             double beta);
+};
 }
