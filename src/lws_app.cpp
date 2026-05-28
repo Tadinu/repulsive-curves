@@ -110,42 +110,10 @@ void LWSApp::outputOBJFrame() {
 }
 
 void LWSApp::benchmarkMethods() {
-    size_t nVerts = curves->NumVertices();
-    sobolevGradients.setZero(nVerts, 3);
-    BVHNode3D* tree_root = 0;
-
-    // Assemble the L2 gradient
-    long bh_start = Utils::currentTimeMilliseconds();
-    tree_root = CreateBVHFromCurve(curves);
-    tpeSolver->AddAllGradients(tree_root, sobolevGradients);
-    Eigen::MatrixXd l2gradients = sobolevGradients;
-    long bh_end = Utils::currentTimeMilliseconds();
-    std::cout << "  Barnes-Hut: " << (bh_end - bh_start) << " ms" << std::endl;
-
-    // Set up multigrid stuff
-    long mg_setup_start = Utils::currentTimeMilliseconds();
-    using MultigridDomain = ConstraintProjectorDomain<VariableConstraintSet>;
-    using MultigridSolver = MultigridHierarchy<MultigridDomain>;
-    double sep = 1.0;
-    MultigridDomain* domain = new MultigridDomain(curves, 3, 6, sep, 0);
-    MultigridSolver* multigrid = new MultigridSolver(domain);
-    long mg_setup_end = Utils::currentTimeMilliseconds();
-    std::cout << "  Multigrid setup: " << (mg_setup_end - mg_setup_start) << " ms" << std::endl;
-
-    // Use multigrid to compute the Sobolev gradient
-    long mg_start = Utils::currentTimeMilliseconds();
-    double soboDot = tpeSolver->ProjectGradientMultigrid<MultigridDomain, MultigridSolver::EigenCG>(
-        sobolevGradients, multigrid, 1e-2);
-    double dot_acc = soboDot / (l2gradients.norm() * sobolevGradients.norm());
-    long mg_end = Utils::currentTimeMilliseconds();
-    std::cout << "  Multigrid solve: " << (mg_end - mg_start) << " ms" << std::endl;
-    std::cout << "  Sobolev gradient norm = " << soboDot << std::endl;
-
-    delete multigrid;
-    if (tree_root) delete tree_root;
+    tpeSolver->StepSobolevLSIterative(0, useBackproj, sobolevGradients);
 }
 
-void LWSApp::writeCurves(PolyCurveNetwork* network, const std::string& positionFilename,
+void LWSApp::writeCurves(const PolyCurveNetwork* network, const std::string& positionFilename,
                          const std::string& tangentFilename) {
     std::vector<Vector3> all_positions;
     std::vector<Vector3> all_tangents;
@@ -182,7 +150,7 @@ void LWSApp::customWindow() {
     ImGui::Begin("Curve options", &LWSOptions::showWindow);
 
     if (ImGui::Button("Export implicit surface")) {
-        WriteImplicitSurface();
+        WriteImplicitSurface(implicitSurfaceName);
     }
 
     if (ImGui::Button("Output frame")) {
@@ -330,8 +298,6 @@ void LWSApp::customWindow() {
             outTan << "f " << I + 2 << " " << I + 3 << " " << I + 7 << " " << I + 6 << endl;
         }
     }
-
-    double delta = 0.001;
 
     if (ImGui::Button("Benchmark methods")) {
         benchmarkMethods();
@@ -490,7 +456,7 @@ void LWSApp::UpdateCurvePositions() {
     polyscope::requestRedraw();
 }
 
-void LWSApp::VisualizeMesh(const std::string& objName) {
+void LWSApp::VisualizeMesh(const std::string& objName) const {
     std::unique_ptr<HalfedgeMesh> mesh;
     std::unique_ptr<VertexPositionGeometry> geometry;
     std::tie(mesh, geometry) = loadMesh(objName);
@@ -541,31 +507,31 @@ void LWSApp::SubdivideCurve() {
     curves = subdivided;
 }
 
-void LWSApp::MeshImplicitSurface(ImplicitSurface* surface) {
-    CIsoSurface<double>* iso = new CIsoSurface<double>();
+void LWSApp::CreateImplicitSurfaceMesh(const ImplicitSurface* surface, const char* surfaceMeshName) {
+    auto* iso = new CIsoSurface<double>();
 
     std::cout << "Meshing the supplied implicit surface using marching cubes..." << std::endl;
 
-    const int numCells = 50;
-    Vector3 center = surface->BoundingCenter();
-    double diameter = surface->BoundingDiameter();
-    double cellSize = diameter / numCells;
-    double radius = diameter / 2;
+    static constexpr int numCells = 50;
+    const Vector3 center = surface->BoundingCenter();
+    const double diameter = surface->BoundingDiameter();
+    const double cellSize = diameter / numCells;
+    const double radius = diameter / 2;
 
-    Vector3 lowerCorner = center - Vector3{radius, radius, radius};
+    const Vector3 lowerCorner = center - Vector3{radius, radius, radius};
 
-    int numCorners = numCells + 1;
+    static constexpr int numCorners = numCells + 1;
 
     double field[numCorners * numCorners * numCorners];
 
-    int nSlice = numCorners * numCorners;
-    int nRow = numCorners;
+    const int nSlice = numCorners * numCorners;
+    const int nRow = numCorners;
 
     for (int x = 0; x < numCorners; x++) {
         for (int y = 0; y < numCorners; y++) {
             for (int z = 0; z < numCorners; z++) {
-                Vector3 samplePt = lowerCorner + Vector3{(double)x, (double)y, (double)z} * cellSize;
-                double value = surface->SignedDistance(samplePt);
+                Vector3 samplePt = lowerCorner + Vector3{double(x), (double)y, (double)z} * cellSize;
+                const double value = surface->SignedDistance(samplePt);
                 field[nSlice * z + nRow * y + x] = value;
             }
         }
@@ -576,36 +542,36 @@ void LWSApp::MeshImplicitSurface(ImplicitSurface* surface) {
     std::vector<glm::vec3> nodes;
     std::vector<std::array<size_t, 3>> triangles;
 
-    int nVerts = iso->m_nVertices;
+    const int nVerts = iso->m_nVertices;
 
     for (int i = 0; i < nVerts; i++) {
-        double x = iso->m_ppt3dVertices[i][0];
-        double y = iso->m_ppt3dVertices[i][1];
-        double z = iso->m_ppt3dVertices[i][2];
+        const double x = iso->m_ppt3dVertices[i][0];
+        const double y = iso->m_ppt3dVertices[i][1];
+        const double z = iso->m_ppt3dVertices[i][2];
 
-        Vector3 p = lowerCorner + Vector3{x, y, z};
-        nodes.push_back(glm::vec3{p.x, p.y, p.z});
+        const Vector3 p = lowerCorner + Vector3{x, y, z};
+        nodes.emplace_back(p.x, p.y, p.z);
     }
 
-    int nTris = iso->m_nTriangles;
+    const int nTris = iso->m_nTriangles;
 
     for (int i = 0; i < nTris; i++) {
-        int i1 = iso->m_piTriangleIndices[3 * i];
-        int i2 = iso->m_piTriangleIndices[3 * i + 1];
-        int i3 = iso->m_piTriangleIndices[3 * i + 2];
+        const int i1 = iso->m_piTriangleIndices[3 * i];
+        const int i2 = iso->m_piTriangleIndices[3 * i + 1];
+        const int i3 = iso->m_piTriangleIndices[3 * i + 2];
 
         triangles.push_back({(size_t)i1, (size_t)i2, (size_t)i3});
     }
 
-    polyscope::registerSurfaceMesh("implicitSurface", nodes, triangles);
+    polyscope::registerSurfaceMesh(surfaceMeshName, nodes, triangles);
     delete iso;
 }
 
-void LWSApp::WriteImplicitSurface() {
-    polyscope::SurfaceMesh* mesh = polyscope::getSurfaceMesh("implicitSurface");
+void LWSApp::WriteImplicitSurface(const char* surfaceMeshName) {
+    polyscope::SurfaceMesh* mesh = polyscope::getSurfaceMesh(surfaceMeshName);
     std::cout << "Writing implicit surface to implicitSurface.obj..." << std::endl;
 
-    std::ofstream objFile("implicitSurface.obj");
+    std::ofstream objFile(std::string(surfaceMeshName) + ".obj");
 
     size_t nVerts = mesh->nVertices();
 
@@ -855,7 +821,7 @@ void LWSApp::processSceneFile(const std::string& filename) {
 
     if (data.constraintSurface) {
         curves->constraintSurface = data.constraintSurface;
-        MeshImplicitSurface(curves->constraintSurface);
+        CreateImplicitSurfaceMesh(curves->constraintSurface, implicitSurfaceName);
     }
 
     if (data.constrainAllToSurface) {

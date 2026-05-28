@@ -19,6 +19,8 @@
 namespace LWS {
 class LWSApp {
 public:
+    static constexpr auto* sobolevGradNetworkName = "SobolevGradients";
+    static constexpr auto* implicitSurfaceName = "implicitSurface";
     static LWSApp* instance;
     static double LWSVertexEnergy(surface::VertexPositionGeometry* geom, const surface::Vertex& vert);
     static Vector3 LWSVertexGradient(surface::VertexPositionGeometry* geom, const surface::Vertex& base,
@@ -30,6 +32,8 @@ public:
     static void DisplaySobolevGradients(const PolyCurveNetwork* curves,
                                         const Eigen::MatrixXd& sobolevGradients);
     static void ClearSobolevGradients();
+    static void CreateImplicitSurfaceMesh(const ImplicitSurface* surface, const char* surfaceMeshName);
+    static void WriteImplicitSurface(const char* surfaceMeshName);
 
     void customWindow();
     void initSolver();
@@ -37,26 +41,23 @@ public:
     void processLoopFile(const std::string& filename);
     void processSceneFile(const std::string& filename);
 
-    void VisualizeMesh(const std::string& objName);
+    void VisualizeMesh(const std::string& objName) const;
     void AddMeshObstacle(const std::string& objName, const Vector3& center, double p, double weight);
     void AddPlaneObstacle(const Vector3& center, const Vector3& normal, double p, double weight);
     void AddSphereObstacle(const Vector3& center, double radius);
     void SubdivideCurve();
-    void MeshImplicitSurface(ImplicitSurface* surface);
-    void WriteImplicitSurface();
 
     std::string curveName;
     PolyCurveNetwork* curves = nullptr;
     TPEFlowSolverSC* tpeSolver = nullptr;
     Eigen::MatrixXd sobolevGradients;
-    static constexpr const char* sobolevGradNetworkName = "Sobolev Gradients";
 
 private:
     void centerizeLoopBarycenter(PolyCurveNetwork* curves);
     void UpdateCurvePositions();
     void outputFrame();
     void outputOBJFrame();
-    void writeCurves(PolyCurveNetwork* network, const std::string& positionFilename,
+    void writeCurves(const PolyCurveNetwork* network, const std::string& positionFilename,
                      const std::string& tangentFilename);
     void benchmarkMethods();
 

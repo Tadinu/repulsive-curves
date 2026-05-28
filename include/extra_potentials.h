@@ -5,98 +5,99 @@
 #include "vert_jacobian.h"
 
 namespace LWS {
+class CurvePotential {
+public:
+    CurvePotential();
+    virtual ~CurvePotential();
+    virtual double CurrentValue(const PolyCurveNetwork* curves) const;
+    virtual void AddGradient(const PolyCurveNetwork* curves, Eigen::MatrixXd& gradient) const;
+};
 
-    class CurvePotential {
-        public:
-        CurvePotential();
-        virtual ~CurvePotential();
-        virtual double CurrentValue(PolyCurveNetwork* curves);
-        virtual void AddGradient(PolyCurveNetwork* curves, Eigen::MatrixXd &gradient);
-    };
+class TotalLengthPotential : public CurvePotential {
+public:
+    explicit TotalLengthPotential(double wt);
+    virtual double CurrentValue(const PolyCurveNetwork* curves) const override;
+    virtual void AddGradient(const PolyCurveNetwork* curves, Eigen::MatrixXd& gradient) const override;
 
-    class TotalLengthPotential : public CurvePotential {
-        public:
-        TotalLengthPotential(double wt);
-        virtual double CurrentValue(PolyCurveNetwork* curves);
-        virtual void AddGradient(PolyCurveNetwork* curves, Eigen::MatrixXd &gradient);
+private:
+    double weight;
+};
 
-        private:
-        double weight;
-    };
+class LengthDifferencePotential : public CurvePotential {
+public:
+    explicit LengthDifferencePotential(double wt);
+    virtual double CurrentValue(const PolyCurveNetwork* curves) const override;
+    virtual void AddGradient(const PolyCurveNetwork* curves, Eigen::MatrixXd& gradient) const override;
 
-    class LengthDifferencePotential : public CurvePotential {
-        public:
-        LengthDifferencePotential(double wt);
-        virtual double CurrentValue(PolyCurveNetwork* curves);
-        virtual void AddGradient(PolyCurveNetwork* curves, Eigen::MatrixXd &gradient);
+private:
+    double LenDiff(const PolyCurveNetwork* curves, int i) const;
+    double weight;
+};
 
-        private:
-        double LenDiff(PolyCurveNetwork* curves, int i);
-        double weight;
-    };
+class PinBendingPotential : public CurvePotential {
+public:
+    explicit PinBendingPotential(double wt);
+    virtual double CurrentValue(const PolyCurveNetwork* curves) const override;
+    virtual void AddGradient(const PolyCurveNetwork* curves, Eigen::MatrixXd& gradient) const override;
 
-    class PinBendingPotential : public CurvePotential {
-        public:
-        PinBendingPotential(double wt);
-        virtual double CurrentValue(PolyCurveNetwork* curves);
-        virtual void AddGradient(PolyCurveNetwork* curves, Eigen::MatrixXd &gradient);
+private:
+    double weight;
+};
 
-        private:
-        double weight;
-    };
+class VectorField {
+public:
+    VectorField();
+    virtual ~VectorField();
+    virtual Vector3 Sample(const Vector3& x) const;
+    virtual VertJacobian SpatialDerivative(const Vector3& x) const;
+};
 
-    class VectorField {
-        public:
-        VectorField();
-        virtual ~VectorField();
-        virtual Vector3 Sample(Vector3 x);
-        virtual VertJacobian SpatialDerivative(Vector3 x);
-    };
+class ConstantVectorField : public VectorField {
+public:
+    explicit ConstantVectorField(const Vector3& v);
+    virtual Vector3 Sample(const Vector3& x) const override;
+    virtual VertJacobian SpatialDerivative(const Vector3& x) const override;
 
-    class ConstantVectorField : public VectorField {
-        public:
-        ConstantVectorField(Vector3 v);
-        virtual Vector3 Sample(Vector3 x);
-        virtual VertJacobian SpatialDerivative(Vector3 x);
-        private:
-        Vector3 c;
-    };
+private:
+    Vector3 c;
+};
 
-    class CircularVectorField : public VectorField {
-        public:
-        CircularVectorField();
-        virtual Vector3 Sample(Vector3 x);
-        virtual VertJacobian SpatialDerivative(Vector3 x);
-        private:
-        Vector3 dirDeriv(Vector3 x, Vector3 dir);
-    };
+class CircularVectorField : public VectorField {
+public:
+    CircularVectorField();
+    virtual Vector3 Sample(const Vector3& x) const override;
+    virtual VertJacobian SpatialDerivative(const Vector3& x) const override;
 
-    class InterestingVectorField : public VectorField {
-        public:
-        InterestingVectorField();
-        virtual Vector3 Sample(Vector3 x);
-        virtual VertJacobian SpatialDerivative(Vector3 x);
-    };
+private:
+    Vector3 dirDeriv(const Vector3& x, const Vector3& dir) const;
+};
 
-    class VectorFieldPotential : public CurvePotential {
-        public:
-        VectorFieldPotential(double wt, VectorField* vf);
-        ~VectorFieldPotential();
-        virtual double CurrentValue(PolyCurveNetwork* curves);
-        virtual void AddGradient(PolyCurveNetwork* curves, Eigen::MatrixXd &gradient);
-        private:
-        double weight;
-        VectorField* field;
-    };
+class InterestingVectorField : public VectorField {
+public:
+    InterestingVectorField();
+    virtual Vector3 Sample(const Vector3& x) const override;
+    virtual VertJacobian SpatialDerivative(const Vector3& x) const override;
+};
 
-    // class AreaPotential : public CurvePotential {
-    //     public:
-    //     AreaPotential(double wt);
-    //     virtual double CurrentValue(PolyCurveNetwork* curves);
-    //     virtual void AddGradient(PolyCurveNetwork* curves, Eigen::MatrixXd &gradient);
+class VectorFieldPotential : public CurvePotential {
+public:
+    VectorFieldPotential(double wt, VectorField* vf);
+    ~VectorFieldPotential() override;
+    virtual double CurrentValue(const PolyCurveNetwork* curves) const override;
+    virtual void AddGradient(const PolyCurveNetwork* curves, Eigen::MatrixXd& gradient) const override;
 
-    //     private:
-    //     double weight;  
-    // };
+private:
+    double weight = 0.;
+    VectorField* field = nullptr;
+};
 
+// class AreaPotential : public CurvePotential {
+//     public:
+//     AreaPotential(double wt);
+//     virtual double CurrentValue(const PolyCurveNetwork* curves)const override;
+//     virtual void AddGradient(const PolyCurveNetwork* curves, Eigen::MatrixXd &gradient)const override;
+
+//     private:
+//     double weight= 0.;
+// };
 }

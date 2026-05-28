@@ -95,11 +95,11 @@ public:
                                        const PolyCurveNetwork* curves, double alpha, double beta) override;
     int NumElements() const;
 
-    virtual double bodyEnergyEvaluation(const CurveVertex* i_pt, double alpha, double beta);
-    virtual Vector3 bodyForceEvaluation(const CurveVertex* i_pt, double alpha, double beta);
+    virtual double bodyEnergyEvaluation(const CurveVertex* i_pt, double alpha, double beta) const;
+    virtual Vector3 bodyForceEvaluation(const CurveVertex* i_pt, double alpha, double beta) const;
 
     Vector3 exactGradient(const CurveVertex* basePoint, const PolyCurveNetwork* curves, double alpha,
-                          double beta);
+                          double beta) const;
 
     PosTan minBound() const;
     PosTan maxBound() const;
@@ -108,8 +108,8 @@ public:
 
     // for visualization, assign each node a range of indices
     // determined by the (post)ordering of its leaves
-    int indexStart;
-    int indexEnd;
+    int indexStart = 0;
+    int indexEnd = 0;
 
     int indexNodes(int index) {
         indexStart = indexEnd = index;
@@ -128,7 +128,7 @@ public:
     void accumulateChildren(std::vector<VertexBody6D>& result);
     Vector2 viewspaceBounds(const Vector3& point) const;
 
-    inline void fillClusterMassVector(Eigen::VectorXd& w) {
+    inline void fillClusterMassVector(Eigen::VectorXd& w) const {
         w.setZero(clusterIndices.size());
         for (size_t i = 0; i < clusterIndices.size(); i++) {
             w(i) = bvhRoot->fullMasses(clusterIndices[i]);
@@ -165,7 +165,7 @@ public:
     inline double nodeRatio(double d) const {
         // Compute diagonal distance from corner to corner
         // double diag = norm(maxCoords.position - minCoords.position);
-        Vector3 diag = maxCoords.position - minCoords.position;
+        const Vector3 diag = maxCoords.position - minCoords.position;
         double maxCoord = fmax(diag.x, fmax(diag.y, diag.z));
         // double spatialR = diag.norm() / 2;
         return diag.norm() / d;
@@ -274,8 +274,8 @@ inline void BVHNode3D::recomputeCentersOfMass(const T* curves) {
         numElements = 1;
     } else {
         // Recursively compute bounds for all children
-        for (size_t i = 0; i < children.size(); i++) {
-            children[i]->recomputeCentersOfMass(curves);
+        for (auto* child : children) {
+            child->recomputeCentersOfMass(curves);
         }
 
         minCoords = children[0]->minCoords;
@@ -287,7 +287,7 @@ inline void BVHNode3D::recomputeCentersOfMass(const T* curves) {
 
         // Accumulate max/min over all nonempty children
         numElements = 0;
-        for (const auto& child : children) {
+        for (const auto* child : children) {
             if (!child->isEmpty) {
                 minCoords = postan_min(child->minCoords, minCoords);
                 maxCoords = postan_max(child->maxCoords, maxCoords);

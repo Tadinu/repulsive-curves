@@ -332,12 +332,10 @@ double BVHNode3D::AxisSplittingPlane(const std::vector<VertexBody6D>& points, in
 
 void BVHNode3D::refreshWeightsVector(const PolyCurveNetwork* curves, BodyType bType) {
     if (bType == BodyType::Vertex) {
-        const int nVerts = curves->NumVertices();
         for (const CurveVertex* v : curves->Vertices()) {
             fullMasses(v->id) = v->DualLength();
         }
     } else if (bType == BodyType::Edge) {
-        const int nEdges = curves->NumEdges();
         for (const CurveEdge* e : curves->Edges()) {
             fullMasses(e->id) = e->Length();
         }
@@ -428,9 +426,8 @@ void BVHNode3D::accumulateVertexEnergy(double& result, const CurveVertex* i_pt,
     }
 }
 
-double BVHNode3D::bodyEnergyEvaluation(const CurveVertex* i_pt, double alpha, double beta) {
-    Vector3 tangent = averageTangent;
-    tangent = tangent.normalize();
+double BVHNode3D::bodyEnergyEvaluation(const CurveVertex* i_pt, double alpha, double beta) const {
+    const Vector3 tangent = averageTangent.normalize();
     return TPESC::tpe_pair_pts(i_pt->Position(), centerOfMass, tangent, i_pt->DualLength(), totalMass, alpha,
                                beta);
 }
@@ -488,7 +485,7 @@ void BVHNode3D::accumulateTPEGradient(Eigen::MatrixXd& gradients, const CurveVer
                 i_pts.push_back(i_pt->edge(e)->Opposite(i_pt));
             }
 
-            TangentMassPoint jm{tangent, body.mass, body.pt.position, j1, j2};
+            const TangentMassPoint jm{tangent, body.mass, body.pt.position, j1, j2};
 
             if (i_pt != j1 && i_pt != j2) {
                 for (const CurveVertex* i_n : i_pts) {
@@ -502,7 +499,7 @@ void BVHNode3D::accumulateTPEGradient(Eigen::MatrixXd& gradients, const CurveVer
             Vector3 tangent = averageTangent;
             tangent = tangent.normalize();
             // This cell is far enough away that we can treat it as a single body
-            TangentMassPoint j{tangent, totalMass, centerOfMass, 0, 0};
+            const TangentMassPoint j{tangent, totalMass, centerOfMass, 0, 0};
 
             // Add i and neighbors of i
             std::vector<const CurveVertex*> i_pts;
@@ -527,13 +524,13 @@ void BVHNode3D::accumulateTPEGradient(Eigen::MatrixXd& gradients, const CurveVer
     }
 }
 
-Vector3 BVHNode3D::bodyForceEvaluation(const CurveVertex* i_pt, double alpha, double beta) {
+Vector3 BVHNode3D::bodyForceEvaluation(const CurveVertex* i_pt, double alpha, double beta) const {
     // TODO: placeholder
     return Vector3::zero();
 }
 
 Vector3 BVHNode3D::exactGradient(const CurveVertex* i_pt, const PolyCurveNetwork* curves, double alpha,
-                                 double beta) {
+                                 double beta) const {
     if (isEmpty) {
         return Vector3::zero();
     } else if (isLeaf) {

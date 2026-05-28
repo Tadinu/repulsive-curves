@@ -323,18 +323,23 @@ double TPEFlowSolverSC::LSBackproject(const Eigen::MatrixXd& gradient, double in
 }
 
 bool TPEFlowSolverSC::StepLS(bool useBH) {
-    int nVerts = curveNetwork->NumVertices();
+    const int nVerts = curveNetwork->NumVertices();
     Eigen::MatrixXd gradients(nVerts, 3);
     gradients.setZero();
 
     // FillGradientVectorDirect(gradients);
-    BVHNode3D* tree_root = 0;
-    if (useBH) tree_root = CreateBVHFromCurve(curveNetwork);
-    AddAllGradients(tree_root, gradients);
-    double gradNorm = gradients.norm();
-    double step_size = LineSearchStep(gradients, 1, tree_root);
+    if (useBH) {
+        if (curveNetworkBVH) {
+            curveNetworkBVH->recomputeCentersOfMass(curveNetwork);
+        } else {
+            curveNetworkBVH = CreateBVHFromCurve(curveNetwork);
+        }
+        AddAllGradients(curveNetworkBVH, gradients);
+    }
 
-    delete tree_root;
+    const double gradNorm = gradients.norm();
+    const double step_size = LineSearchStep(gradients, 1, curveNetworkBVH);
+
     soboNormZero = (gradNorm < 1e-4);
     lastStepSize = step_size;
     return (step_size > ls_step_threshold);
@@ -559,8 +564,15 @@ bool TPEFlowSolverSC::StepSobolevLS(bool useBH, bool useBackproj, Eigen::MatrixX
 
     // Assemble gradient, either exactly or with Barnes-Hut
     const long bh_start = Utils::currentTimeMilliseconds();
-    BVHNode3D* tree_root = useBH ? CreateBVHFromCurve(curveNetwork) : nullptr;
-    AddAllGradients(tree_root, outSobolevGradients);
+    if (useBH) {
+        if (curveNetworkBVH) {
+            curveNetworkBVH->recomputeCentersOfMass(curveNetwork);
+        } else {
+            curveNetworkBVH = CreateBVHFromCurve(curveNetwork);
+        }
+
+        AddAllGradients(curveNetworkBVH, outSobolevGradients);
+    }
     const Eigen::MatrixXd l2Gradients = outSobolevGradients;
 
     std::cout << "=== Iteration " << ++iterNum << " ===" << std::endl;
@@ -591,7 +603,7 @@ bool TPEFlowSolverSC::StepSobolevLS(bool useBH, bool useBackproj, Eigen::MatrixX
 
     // Take a line search step using this gradient
     const double ls_start = Utils::currentTimeMilliseconds();
-    double step_size = LineSearchStep(outSobolevGradients, dot_acc, tree_root);
+    double step_size = LineSearchStep(outSobolevGradients, dot_acc, curveNetworkBVH);
     // double step_size = CircleSearchStep(outSobolevGradients, secondDeriv, A, tree_root);
     const double ls_end = Utils::currentTimeMilliseconds();
     std::cout << "  Line search: " << (ls_end - ls_start) << " ms" << std::endl;
@@ -603,16 +615,11 @@ bool TPEFlowSolverSC::StepSobolevLS(bool useBH, bool useBackproj, Eigen::MatrixX
     // Correct for drift with backprojection
     const double bp_start = Utils::currentTimeMilliseconds();
     if (useBackproj) {
-        step_size = LSBackproject(outSobolevGradients, step_size, lu, dot_acc, tree_root);
+        step_size = LSBackproject(outSobolevGradients, step_size, lu, dot_acc, curveNetworkBVH);
     }
     const double bp_end = Utils::currentTimeMilliseconds();
     std::cout << "  Backprojection: " << (bp_end - bp_start) << " ms" << std::endl;
     std::cout << "  Final step size = " << step_size << std::endl;
-
-    if (tree_root) {
-        delete tree_root;
-        tree_root = nullptr;
-    }
 
     const double length2 = curveNetwork->TotalLength();
     std::cout << "Length " << length1 << " -> " << length2 << std::endl;
@@ -641,70 +648,75 @@ bool TPEFlowSolverSC::StepSobolevLSIterative(double epsilon, bool useBackproj,
     std::cout << "=== Iteration " << ++iterNum << " ===" << std::endl;
     long all_start = Utils::currentTimeMilliseconds();
 
-    size_t nVerts = curveNetwork->NumVertices();
+    const size_t nVerts = curveNetwork->NumVertices();
     outSobolevGradients.setZero(nVerts, 3);
-    BVHNode3D* tree_root = 0;
 
     // If applicable, move constraint targets
     MoveLengthTowardsTarget();
 
     // Assemble the L2 gradient
-    long bh_start = Utils::currentTimeMilliseconds();
-    tree_root = CreateBVHFromCurve(curveNetwork);
-    AddAllGradients(tree_root, outSobolevGradients);
-    Eigen::MatrixXd l2gradients = outSobolevGradients;
-    long bh_end = Utils::currentTimeMilliseconds();
+    const long bh_start = Utils::currentTimeMilliseconds();
+    if (curveNetworkBVH) {
+        curveNetworkBVH->recomputeCentersOfMass(curveNetwork);
+    } else {
+        curveNetworkBVH = CreateBVHFromCurve(curveNetwork);
+    }
+
+    AddAllGradients(curveNetworkBVH, outSobolevGradients);
+
+    const Eigen::MatrixXd l2gradients = outSobolevGradients;
+    const long bh_end = Utils::currentTimeMilliseconds();
     std::cout << "  Barnes-Hut: " << (bh_end - bh_start) << " ms" << std::endl;
 
     // Set up multigrid stuff
-    long mg_setup_start = Utils::currentTimeMilliseconds();
+    const long mg_setup_start = Utils::currentTimeMilliseconds();
     using MultigridDomain = ConstraintProjectorDomain<ConstraintClassType>;
     using MultigridSolver = MultigridHierarchy<MultigridDomain>;
-    double sep = 1.0;
+    static constexpr double sep = 1.0;
     MultigridDomain* domain = new MultigridDomain(curveNetwork, alpha, beta, sep, epsilon);
     MultigridSolver* multigrid = new MultigridSolver(domain);
-    long mg_setup_end = Utils::currentTimeMilliseconds();
+
+    const long mg_setup_end = Utils::currentTimeMilliseconds();
     std::cout << "  Multigrid setup: " << (mg_setup_end - mg_setup_start) << " ms" << std::endl;
 
     // Use multigrid to compute the Sobolev gradient
-    long mg_start = Utils::currentTimeMilliseconds();
-    double soboDot = ProjectGradientMultigrid<MultigridDomain, MultigridSolver::EigenCG>(
+    const long mg_start = Utils::currentTimeMilliseconds();
+    const double soboDot = ProjectGradientMultigrid<MultigridDomain, MultigridSolver::EigenCG>(
         outSobolevGradients, multigrid, mg_tolerance);
-    double dot_acc = soboDot / (l2gradients.norm() * outSobolevGradients.norm());
-    long mg_end = Utils::currentTimeMilliseconds();
+    const double dot_acc = soboDot / (l2gradients.norm() * outSobolevGradients.norm());
+    const long mg_end = Utils::currentTimeMilliseconds();
     std::cout << "  Multigrid solve: " << (mg_end - mg_start) << " ms" << std::endl;
     std::cout << "  Sobolev gradient norm = " << soboDot << std::endl;
 
     // Take a line search step using this gradient
-    long ls_start = Utils::currentTimeMilliseconds();
+    const long ls_start = Utils::currentTimeMilliseconds();
     // double step_size = CircleSearch::CircleSearchStep<MultigridSolver, MultigridSolver::EigenCG>(curveNetwork,
     //     vertGradients, l2gradients, tree_root, multigrid, initialLengths, dot_acc, alpha, beta, 1e-6);
-    double step_size = LineSearchStep(outSobolevGradients, dot_acc, tree_root);
-    long ls_end = Utils::currentTimeMilliseconds();
+    double step_size = LineSearchStep(outSobolevGradients, dot_acc, curveNetworkBVH);
+    const long ls_end = Utils::currentTimeMilliseconds();
     std::cout << "  Line search: " << (ls_end - ls_start) << " ms" << std::endl;
 
     // Correct for drift with backprojection
-    long bp_start = Utils::currentTimeMilliseconds();
+    const long bp_start = Utils::currentTimeMilliseconds();
     if (useBackproj) {
         step_size = LSBackprojectMultigrid<MultigridDomain, MultigridSolver::EigenCG>(outSobolevGradients,
-            step_size, multigrid, tree_root, mg_tolerance);
+            step_size, multigrid, curveNetworkBVH, mg_tolerance);
     }
-    long bp_end = Utils::currentTimeMilliseconds();
+    const long bp_end = Utils::currentTimeMilliseconds();
     std::cout << "  Backprojection: " << (bp_end - bp_start) << " ms" << std::endl;
     std::cout << "  Final step size = " << step_size << std::endl;
 
     delete multigrid;
-    if (tree_root) delete tree_root;
 
-    long all_end = Utils::currentTimeMilliseconds();
+    const long all_end = Utils::currentTimeMilliseconds();
     std::cout << "  Total time: " << (all_end - all_start) << " ms" << std::endl;
 
     if (perfLogEnabled) {
-        double bh_time = bh_end - bh_start;
-        double mg_time = mg_end - mg_setup_start;
-        double ls_time = ls_end - ls_start;
-        double bp_time = bp_end - bp_start;
-        double all_time = all_end - all_start;
+        const double bh_time = bh_end - bh_start;
+        const double mg_time = mg_end - mg_setup_start;
+        const double ls_time = ls_end - ls_start;
+        const double bp_time = bp_end - bp_start;
+        const double all_time = all_end - all_start;
 
         perfFile << iterNum << ", " << bh_time << ", " << mg_time << ", " << ls_time << ", " << bp_time <<
             ", " << all_time << std::endl;

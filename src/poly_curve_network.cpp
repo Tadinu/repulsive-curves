@@ -462,7 +462,7 @@ PolyCurveNetwork* PolyCurveNetwork::Coarsen(MatrixProjectorOperator* op, bool do
 
     std::vector<int> vertCounts(coarseCount);
 
-    for (auto& e : coarseEdges) {
+    for (const auto& e : coarseEdges) {
         vertCounts[e[0]]++;
         vertCounts[e[1]]++;
     }

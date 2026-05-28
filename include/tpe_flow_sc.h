@@ -130,6 +130,7 @@ private:
     double mg_backproj_threshold = 0.;
     double lastStepSize = 0.;
     PolyCurveNetwork* curveNetwork = nullptr;
+    BVHNode3D* curveNetworkBVH = nullptr;
     Eigen::MatrixXd originalPositionMatrix;
     Eigen::VectorXd constraintTargets;
     Eigen::VectorXd fullDerivVector;
@@ -149,15 +150,15 @@ double TPEFlowSolverSC::ProjectGradientMultigrid(Eigen::MatrixXd& gradients,
     Eigen::VectorXd gradients3x;
     // Copy only the rows that actually contain gradient vectors
     gradients3x.setZero(curveNetwork->NumVertices() * 3);
-    auto block = gradients.block(0, 0, curveNetwork->NumVertices(), 3);
+    const Eigen::MatrixXd block = gradients.block(0, 0, curveNetwork->NumVertices(), 3);
     MatrixIntoVectorX3(block, gradients3x);
     // Project this vector into the constraint null-space:
     // we really want to solve PGPx = Pb
     gradients3x = curveNetwork->constraintProjector->ProjectToNullspace(gradients3x);
     // Solve PGPx = Pb using multigrid
-    Eigen::VectorXd sobolevGradients = solver->template VCycleSolve<Smoother>(gradients3x, tol);
+    const Eigen::VectorXd sobolevGradients = solver->template VCycleSolve<Smoother>(gradients3x, tol);
     // Compute dot product with unprojected gradient, and copy into results vector
-    double soboDot = gradients3x.dot(sobolevGradients);
+    const double soboDot = gradients3x.dot(sobolevGradients);
     // double dirDot = soboDot / (gradients3x.norm() * sobolevGradients.norm());
     gradients.setZero();
     VectorXdIntoMatrix(sobolevGradients, gradients);
@@ -167,7 +168,7 @@ double TPEFlowSolverSC::ProjectGradientMultigrid(Eigen::MatrixXd& gradients,
 template <typename Domain, typename Smoother>
 double TPEFlowSolverSC::BackprojectConstraintsMultigrid(const Eigen::MatrixXd& gradient,
                                                         MultigridHierarchy<Domain>* solver, double tol) {
-    int nVerts = curveNetwork->NumVertices();
+    const int nVerts = curveNetwork->NumVertices();
     Eigen::VectorXd phi(constraint.NumConstraintRows());
     Eigen::MatrixXd correction(nVerts, 3);
     correction.setZero();
@@ -175,12 +176,10 @@ double TPEFlowSolverSC::BackprojectConstraintsMultigrid(const Eigen::MatrixXd& g
     // Compute and apply the correction
     this->template BackprojectMultigrid<Domain, Smoother>(solver, curveNetwork, phi, correction, tol);
     for (int i = 0; i < nVerts; i++) {
-        CurveVertex* p = curveNetwork->GetVertex(i);
-        Vector3 cur = p->Position();
-        p->SetPosition(cur + SelectRow(correction, i));
+        *curveNetwork->GetVertex(i) += SelectRow(correction, i);
     }
     // Add length violations to RHS
-    double maxViolation = constraint.FillConstraintValues(phi, constraintTargets, 0);
+    const double maxViolation = constraint.FillConstraintValues(phi, constraintTargets, 0);
     std::cout << "  Constraint value = " << maxViolation << std::endl;
     return maxViolation;
 }
@@ -201,7 +200,8 @@ double TPEFlowSolverSC::LSBackprojectMultigrid(const Eigen::MatrixXd& gradient, 
         }
 
         for (int c = 0; c < 2; c++) {
-            double maxViolation = BackprojectConstraintsMultigrid<Domain, Smoother>(gradient, solver, tol);
+            const double maxViolation = BackprojectConstraintsMultigrid<Domain, Smoother>(
+                gradient, solver, tol);
             if (maxViolation < mg_backproj_threshold) {
                 std::cout << "Backprojection successful after " << attempts << " attempts" << std::endl;
                 std::cout << "Used " << (c + 1) << " Newton steps on successful attempt" << std::endl;
