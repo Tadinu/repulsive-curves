@@ -22,12 +22,13 @@ public:
     static constexpr auto* sobolevGradNetworkName = "SobolevGradients";
     static constexpr auto* implicitSurfaceName = "implicitSurface";
     static LWSApp* instance;
+    static void Start();
     static double LWSVertexEnergy(surface::VertexPositionGeometry* geom, const surface::Vertex& vert);
     static Vector3 LWSVertexGradient(surface::VertexPositionGeometry* geom, const surface::Vertex& base,
                                      const surface::Vertex& other);
     static void DisplayWireSphere(const Vector3& center, double radius, const std::string& name);
     static void DisplayPlane(const Vector3& center, const Vector3& normal, const std::string& name);
-    static void DisplayCurves(const PolyCurveNetwork* curves, const std::string& name);
+    static void DisplayCurveNetwork(const PolyCurveNetwork* curves, const std::string& name);
     static void DisplayCyclicList(const std::vector<Vector3>& positions, const std::string& name);
     static void DisplaySobolevGradients(const PolyCurveNetwork* curves,
                                         const Eigen::MatrixXd& sobolevGradients);
@@ -42,13 +43,13 @@ public:
     void processSceneFile(const std::string& filename);
 
     void VisualizeMesh(const std::string& objName) const;
-    void AddMeshObstacle(const std::string& objName, const Vector3& center, double p, double weight);
-    void AddPlaneObstacle(const Vector3& center, const Vector3& normal, double p, double weight);
-    void AddSphereObstacle(const Vector3& center, double radius);
+    virtual void AddMeshObstacle(const std::string& objName, const Vector3& center, double p, double weight);
+    virtual void AddPlaneObstacle(const Vector3& center, const Vector3& normal, double p, double weight);
+    virtual void AddSphereObstacle(const Vector3& center, double radius);
     void SubdivideCurve();
 
     std::string curveName;
-    PolyCurveNetwork* curves = nullptr;
+    PolyCurveNetwork* curveNetwork = nullptr;
     TPEFlowSolverSC* tpeSolver = nullptr;
     Eigen::MatrixXd sobolevGradients;
 

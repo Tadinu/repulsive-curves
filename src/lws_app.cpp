@@ -105,7 +105,7 @@ void LWSApp::outputOBJFrame() {
     char buffer[5];
     std::snprintf(buffer, sizeof(buffer), "%04d", objNum);
     objNum++;
-    writeCurves(curves, "objs/curve" + std::string(buffer) + ".obj",
+    writeCurves(curveNetwork, "objs/curve" + std::string(buffer) + ".obj",
                 "objTangents/curve" + std::string(buffer) + ".obj");
 }
 
@@ -197,7 +197,7 @@ void LWSApp::customWindow() {
             } else {
                 good_step = tpeSolver->StepSobolevLS(LWSOptions::useBarnesHut, useBackproj, sobolevGradients);
             }
-            DisplaySobolevGradients(curves, sobolevGradients);
+            DisplaySobolevGradients(curveNetwork, sobolevGradients);
         } else {
             good_step = tpeSolver->StepLS(LWSOptions::useBarnesHut);
             // good_step = tpeSolver->StepLSConstrained(LWSOptions::useBarnesHut, useBackproj);
@@ -222,7 +222,7 @@ void LWSApp::customWindow() {
             numStuckIterations = 0;
         }
 
-        double averageLength = curves->TotalLength() / curves->NumEdges();
+        double averageLength = curveNetwork->TotalLength() / curveNetwork->NumEdges();
         if (averageLength > 2 * initialAverageLength && subdivideCount < subdivideLimit) {
             subdivideCount++;
             SubdivideCurve();
@@ -237,7 +237,7 @@ void LWSApp::customWindow() {
     }
 
     if (ImGui::Button("Curve to OBJ")) {
-        writeCurves(curves, "curve_positions.obj", "curve_tangents.obj");
+        writeCurves(curveNetwork, "curve_positions.obj", "curve_tangents.obj");
     }
 
     if (ImGui::Button("BVH to OBJ")) {
@@ -246,7 +246,7 @@ void LWSApp::customWindow() {
         std::ofstream outTan("bvh_tan.obj"); // bounding boxes around tangents
 
         // re-build the tree (can't always assume it was already built by solver)
-        LWS::BVHNode3D* tree = CreateEdgeBVHFromCurve(curves);
+        LWS::BVHNode3D* tree = CreateEdgeBVHFromCurve(curveNetwork);
         tree->assignIDs();
 
         // iterate over nodes of tree in breadth-first order
@@ -342,15 +342,15 @@ void LWSApp::initSolver() {
     // }
 
     if (!tpeSolver) {
-        if (curves->appliedConstraints.size() == 0) {
+        if (curveNetwork->appliedConstraints.size() == 0) {
             std::cout << "No constraints specified; defaulting to barycenter and edge lengths" << std::endl;
-            curves->appliedConstraints.push_back(ConstraintType::Barycenter);
-            curves->appliedConstraints.push_back(ConstraintType::EdgeLengths);
+            curveNetwork->appliedConstraints.push_back(ConstraintType::Barycenter);
+            curveNetwork->appliedConstraints.push_back(ConstraintType::EdgeLengths);
         }
         // Set up solver
         double alpha = LWSOptions::tpeAlpha;
         double beta = LWSOptions::tpeBeta;
-        tpeSolver = new TPEFlowSolverSC(curves, alpha, beta);
+        tpeSolver = new TPEFlowSolverSC(curveNetwork, alpha, beta);
 
         for (ObstacleData& data : sceneData.obstacles) {
             std::cout << "Adding scene obstacle from " << data.filename << " (weight " << data.weight << ")"
@@ -415,14 +415,14 @@ void LWSApp::initSolver() {
             tpeSolver->SetTotalLengthScaleTarget(sceneData.totalLengthScale);
         }
 
-        initialAverageLength = curves->TotalLength() / curves->NumEdges();
+        initialAverageLength = curveNetwork->TotalLength() / curveNetwork->NumEdges();
     }
 }
 
 void LWSApp::UpdateCurvePositions() {
     // Update the positions on the space curve
-    polyscope::CurveNetwork* curveNetwork = polyscope::getCurveNetwork(curveName);
-    const size_t nVerts = curves->NumVertices();
+    polyscope::CurveNetwork* rendered_curve = polyscope::getCurveNetwork(curveName);
+    const size_t nVerts = curveNetwork->NumVertices();
     std::vector<glm::vec3> curve_vecs(nVerts);
 
     // if the "normalize view" button is checked, center
@@ -431,28 +431,27 @@ void LWSApp::UpdateCurvePositions() {
     Vector3 center = Vector3::zero();
     double radius = 1.;
     if (LWSOptions::normalizeView) {
-        for (size_t i = 0; i < nVerts; i++) {
-            CurveVertex* v_i = curves->GetVertex(i);
-            center += v_i->Position();
+        for (const CurveVertex* vert : curveNetwork->Vertices()) {
+            center += vert->Position();
         }
         center /= nVerts;
 
         radius = 0.;
-        for (size_t i = 0; i < nVerts; i++) {
-            CurveVertex* v_i = curves->GetVertex(i);
-            radius = fmax(radius, (v_i->Position() - center).norm2());
+        for (const CurveVertex* vert : curveNetwork->Vertices()) {
+            radius = fmax(radius, (vert->Position() - center).norm2());
         }
         radius = sqrt(radius);
+
+        // TODO: Update SobolevGradient rendering, for now just clearing!
+        ClearSobolevGradients();
     }
 
-    for (size_t i = 0; i < nVerts; i++) {
-        CurveVertex* v_i = curves->GetVertex(i);
-        Vector3 v = v_i->Position();
-        v = (v - center) / radius;
-        curve_vecs[v_i->GlobalIndex()] = glm::vec3{v.x, v.y, v.z};
+    for (const CurveVertex* vert : curveNetwork->Vertices()) {
+        const auto v = (vert->Position() - center) / radius;
+        curve_vecs[vert->GlobalIndex()] = glm::vec3{v.x, v.y, v.z};
     }
 
-    curveNetwork->updateNodePositions(curve_vecs);
+    rendered_curve->updateNodePositions(curve_vecs);
     polyscope::requestRedraw();
 }
 
@@ -498,13 +497,13 @@ void LWSApp::AddSphereObstacle(const Vector3& center, double radius) {
 }
 
 void LWSApp::SubdivideCurve() {
-    PolyCurveNetwork* subdivided = curves->Subdivide();
+    PolyCurveNetwork* subdivided = curveNetwork->Subdivide();
     glm::vec3 col = polyscope::getCurveNetwork(curveName)->getColor();
-    DisplayCurves(subdivided, curveName);
+    DisplayCurveNetwork(subdivided, curveName);
     polyscope::getCurveNetwork(curveName)->setColor(col);
     tpeSolver->ReplaceCurve(subdivided);
-    delete curves;
-    curves = subdivided;
+    delete curveNetwork;
+    curveNetwork = subdivided;
 }
 
 void LWSApp::CreateImplicitSurfaceMesh(const ImplicitSurface* surface, const char* surfaceMeshName) {
@@ -656,7 +655,7 @@ void LWSApp::DisplayWireSphere(const Vector3& center, double radius, const std::
     polyscope::registerCurveNetwork(name, nodes, edges);
 }
 
-void LWSApp::DisplayCurves(const PolyCurveNetwork* curves, const std::string& name) {
+void LWSApp::DisplayCurveNetwork(const PolyCurveNetwork* curves, const std::string& name) {
     std::vector<glm::vec3> nodes;
     std::vector<std::array<size_t, 2>> edges;
 
@@ -730,7 +729,7 @@ void LWSApp::ClearSobolevGradients() {
 }
 
 void LWSApp::processFileOBJ(const std::string& filename) {
-    if (curves) delete curves;
+    if (curveNetwork) delete curveNetwork;
     std::cout << "Make curves from OBJ " << filename << std::endl;
 
     std::tie(mesh, geom) = loadMesh(filename);
@@ -762,12 +761,12 @@ void LWSApp::processFileOBJ(const std::string& filename) {
         std::cout << "Processed boundary curve of length " << b.degree() << std::endl;
     }
 
-    curves = new PolyCurveNetwork(all_positions, all_edges);
+    curveNetwork = new PolyCurveNetwork(all_positions, all_edges);
     curveName = polyscope::guessNiceNameFromPath(filename);
 }
 
 void LWSApp::processLoopFile(const std::string& filename) {
-    if (curves) delete curves;
+    if (curveNetwork) delete curveNetwork;
     std::cout << "Make curves from indexed loop in " << filename << std::endl;
 
     std::vector<Vector3> all_positions;
@@ -779,7 +778,7 @@ void LWSApp::processLoopFile(const std::string& filename) {
         CurveIO::readFaces(filename, all_edges);
     }
 
-    curves = new PolyCurveNetwork(all_positions, all_edges);
+    curveNetwork = new PolyCurveNetwork(all_positions, all_edges);
     curveName = polyscope::guessNiceNameFromPath(filename);
 }
 
@@ -797,54 +796,54 @@ void LWSApp::processSceneFile(const std::string& filename) {
     // Add constraints
     for (ConstraintType type : data.constraints) {
         std::cout << "Adding constraint " << NameOfConstraint(type) << std::endl;
-        curves->appliedConstraints.push_back(type);
+        curveNetwork->appliedConstraints.push_back(type);
     }
     for (int i : data.pinnedVertices) {
         std::cout << "Pinning vertex position " << i << std::endl;
-        curves->PinVertex(i);
+        curveNetwork->PinVertex(i);
     }
     for (int i : data.pinnedTangents) {
         std::cout << "Pinning vertex tangent " << i << std::endl;
-        curves->PinTangent(i);
+        curveNetwork->PinTangent(i);
     }
 
-    curves->pinnedAllToSurface = false;
+    curveNetwork->pinnedAllToSurface = false;
 
     // Pin all special vertices if specified
     if (data.pinSpecialVertices) {
         std::cout << "Pinning all special vertices" << std::endl;
-        curves->PinAllSpecialVertices(data.pinSpecialTangents);
+        curveNetwork->PinAllSpecialVertices(data.pinSpecialTangents);
     } else if (data.pinEndpointVertices) {
         std::cout << "Pinning all endpoint vertices" << std::endl;
-        curves->PinAllEndpoints(data.pinSpecialTangents);
+        curveNetwork->PinAllEndpoints(data.pinSpecialTangents);
     }
 
     if (data.constraintSurface) {
-        curves->constraintSurface = data.constraintSurface;
-        CreateImplicitSurfaceMesh(curves->constraintSurface, implicitSurfaceName);
+        curveNetwork->constraintSurface = data.constraintSurface;
+        CreateImplicitSurfaceMesh(curveNetwork->constraintSurface, implicitSurfaceName);
     }
 
     if (data.constrainAllToSurface) {
         std::cout << "Constraining all vertices to the implicit surface" << std::endl;
-        for (int i = 0; i < curves->NumVertices(); i++) {
-            curves->PinToSurface(i);
+        for (int i = 0; i < curveNetwork->NumVertices(); i++) {
+            curveNetwork->PinToSurface(i);
         }
-        curves->pinnedAllToSurface = true;
+        curveNetwork->pinnedAllToSurface = true;
     } else if (data.constrainEndpointsToSurface) {
         std::cout << "Constraining endpoint vertices to the implicit surface" << std::endl;
-        for (int i = 0; i < curves->NumVertices(); i++) {
-            CurveVertex* v_i = curves->GetVertex(i);
+        for (int i = 0; i < curveNetwork->NumVertices(); i++) {
+            CurveVertex* v_i = curveNetwork->GetVertex(i);
             if (v_i->numEdges() == 1) {
-                curves->PinToSurface(i);
+                curveNetwork->PinToSurface(i);
             }
         }
     } else {
         for (int i : data.surfaceConstrainedVertices) {
             std::cout << "Pinning vertex " << i << " to the implicit surface" << std::endl;
-            curves->PinToSurface(i);
+            curveNetwork->PinToSurface(i);
         }
     }
-    curves->PrintPins();
+    curveNetwork->PrintPins();
 }
 } // namespace LWS
 
@@ -920,8 +919,8 @@ int main(int argc, char** argv) {
 
     std::cout << "Load curve" << std::endl;
     processFile(LWS::LWSApp::instance, file.Get());
-    std::cout << "Set up curve: " << app->curves->NumVertices() << " nodes" << std::endl;
-    app->DisplayCurves(app->curves, app->curveName);
+    std::cout << "Set up curve: " << app->curveNetwork->NumVertices() << " nodes" << std::endl;
+    app->DisplayCurveNetwork(app->curveNetwork, app->curveName);
     // app->curves->PinVertex(10);
     // app->curves->PinTangent(10);
     app->initSolver();
